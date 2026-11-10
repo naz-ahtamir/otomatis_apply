@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Browser profile & session data (sensitive)
+browser_profile/
+
+# Logs and databases
+*.log
+data/applied_tracker.json
+
+# Screenshots (optional: keep directory, exclude files)
+screenshots/*.png
+!screenshots/.gitkeep
+
+# Environment variables
+.env
+.venv
+env/
+venv/
