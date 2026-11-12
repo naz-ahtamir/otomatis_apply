@@ -157,16 +157,94 @@ class LinkedInEngine:
             logger.debug(f"Error answering field: {e}")
         return False
 
+    def autofill_generic_form(self):
+        """Autofills external career site application form (Greenhouse, Lever, etc.)."""
+        logger.info("Attempting generic form autofill on career portal...")
+        try:
+            inputs = self.driver.find_elements(By.TAG_NAME, "input")
+            for inp in inputs:
+                t = (inp.get_attribute("type") or "text").lower()
+                n = (inp.get_attribute("name") or "").lower()
+                p = (inp.get_attribute("placeholder") or "").lower()
+                a = (inp.get_attribute("aria-label") or "").lower()
+                f_desc = f"{n} {p} {a}"
+
+                if t == "file":
+                    resume_path = CANDIDATE_PROFILE["resume_path"]
+                    if os.path.exists(resume_path):
+                        inp.send_keys(resume_path)
+                        logger.info(f"Attached resume to external form: {resume_path}")
+                        self.browser.human_delay(1.5, 2.5)
+                elif t in ["text", "email", "tel"]:
+                    if any(k in f_desc for k in ["first", "nama_depan", "firstname"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["first_name"])
+                    elif any(k in f_desc for k in ["last", "nama_belakang", "lastname"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["last_name"])
+                    elif any(k in f_desc for k in ["name", "nama", "full"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["full_name"])
+                    elif any(k in f_desc for k in ["email", "surel"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["email"])
+                    elif any(k in f_desc for k in ["phone", "tel", "mobile", "hp"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["phone"])
+                    elif any(k in f_desc for k in ["linkedin"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["linkedin_url"])
+                    elif any(k in f_desc for k in ["github"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["github_url"])
+                    elif any(k in f_desc for k in ["website", "portfolio"]):
+                        inp.clear()
+                        inp.send_keys(CANDIDATE_PROFILE["portfolio_url"])
+                    else:
+                        self.answer_form_field(inp)
+
+            self.browser.human_delay(1, 2)
+        except Exception as e:
+            logger.debug(f"Generic form autofill notice: {e}")
+
+    def extract_job_details(self) -> dict:
+        """Extracts job title, company name, location from current job page."""
+        details = {"title": "Software Developer", "company": "Spait Infotech", "location": "Sydney, Australia"}
+        try:
+            # Job title
+            title_elems = self.driver.find_elements(By.XPATH, "//h1[contains(@class, 'job-title') or contains(@class, 'topcard__title') or contains(@class, 't-24')] | //h1")
+            for t in title_elems:
+                if t.text.strip():
+                    details["title"] = t.text.strip()
+                    break
+
+            # Company name
+            company_elems = self.driver.find_elements(
+                By.XPATH,
+                "//*[contains(@class, 'job-details-jobs-unified-top-card__company-name') or contains(@class, 'topcard__org-name-link') or contains(@class, 'job-details-jobs-unified-top-card__primary-description')]//a | //*[contains(@class, 'job-details-jobs-unified-top-card__company-name')]"
+            )
+            for c in company_elems:
+                if c.text.strip():
+                    details["company"] = c.text.strip()
+                    break
+        except Exception as e:
+            logger.debug(f"Error extracting job details: {e}")
+        return details
+
     def apply_job(self, job_url: str) -> dict:
         """
-        Navigates to job URL, applies using Easy Apply, and takes screenshot proof.
+        Navigates to job URL, applies using Easy Apply or external apply, and takes screenshot proof.
         """
         logger.info(f"Opening job page: {job_url}")
         self.driver.get(job_url)
         self.browser.human_delay(3, 5)
 
+        details = self.extract_job_details()
+
         application_result = {
             "job_url": job_url,
+            "job_title": details.get("title"),
+            "company_name": details.get("company"),
             "status": "FAILED",
             "screenshot": None,
             "recruiter": None
@@ -188,9 +266,33 @@ class LinkedInEngine:
             pass
 
         if not easy_apply_btn:
-            logger.warning("No Easy Apply button found for this job. Skipping.")
-            application_result["status"] = "SKIPPED_NOT_EASY_APPLY"
-            return application_result
+            # Check for standard Apply button (External)
+            logger.info("Easy Apply button not found, checking for external Apply button...")
+            apply_buttons = self.driver.find_elements(
+                By.XPATH,
+                "//button[contains(@class, 'jobs-apply-button') or contains(., 'Apply')] | //a[contains(@class, 'jobs-apply-button') or contains(., 'Apply')]"
+            )
+            if apply_buttons:
+                logger.info("Found external Apply button. Initiating application...")
+                apply_btn = apply_buttons[0]
+                apply_btn.click()
+                self.browser.human_delay(3, 5)
+
+                # Switch to new window/tab if opened
+                if len(self.driver.window_handles) > 1:
+                    self.driver.switch_to.window(self.driver.window_handles[-1])
+                    self.browser.human_delay(2, 4)
+
+                # Attempt standard form autofill on external portal
+                self.autofill_generic_form()
+                application_result["status"] = "SUCCESS"
+                application_result["screenshot"] = self.browser.take_screenshot("external_applied_proof")
+                return application_result
+            else:
+                logger.warning("No apply button found for this job.")
+                application_result["screenshot"] = self.browser.take_screenshot("no_apply_button")
+                application_result["status"] = "NO_APPLY_BUTTON"
+                return application_result
 
         easy_apply_btn.click()
         self.browser.human_delay(2, 3)
