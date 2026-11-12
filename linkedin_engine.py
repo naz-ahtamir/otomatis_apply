@@ -21,7 +21,7 @@ class LinkedInEngine:
         self.driver = browser.driver
 
     def ensure_logged_in(self) -> bool:
-        """Verifies if LinkedIn is logged in. Prompts user in GUI if session missing."""
+        """Verifies if LinkedIn is logged in. Auto-detects login when feed loads."""
         self.driver.get("https://www.linkedin.com/feed/")
         self.browser.human_delay(2, 4)
 
@@ -29,12 +29,19 @@ class LinkedInEngine:
             logger.warning("LinkedIn is not logged in. Waiting for user login...")
             print("\n" + "="*60)
             print("👉 SILAKAN LOGIN KE AKUN LINKEDIN ANDA DI BROWSER.")
-            print("Selesaikan 2FA / CAPTCHA (jika ada) hingga halaman Feed LinkedIn muncul.")
-            print("Setelah itu, kembali ke sini dan tekan ENTER.")
+            print("Selesaikan login / 2FA hingga halaman Feed LinkedIn muncul.")
+            print("Sistem akan otomatis melanjutkan begitu login berhasil terdeteksi...")
             print("="*60 + "\n")
-            input("Tekan ENTER setelah selesai login di LinkedIn...")
-            self.browser.human_delay(2, 3)
-            return True
+
+            # Wait up to 180 seconds for user to log in
+            for i in range(90):
+                time.sleep(2)
+                curr = self.driver.current_url
+                if "feed" in curr or ("login" not in curr and "checkpoint" not in curr):
+                    logger.info("LinkedIn login detected successfully!")
+                    self.browser.human_delay(2, 3)
+                    return True
+            logger.warning("LinkedIn login timeout reached, continuing anyway...")
         logger.info("LinkedIn session active.")
         return True
 

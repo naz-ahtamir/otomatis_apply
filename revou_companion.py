@@ -17,20 +17,27 @@ class RevoUCompanion:
         self.driver = browser.driver
 
     def ensure_logged_in(self) -> bool:
-        """Checks if logged into RevoU. If at /login, prompts user to login."""
+        """Checks if logged into RevoU. If at /login, waits for user to log in on the browser."""
         self.driver.get(REVOU_JOB_MATCHING_URL)
         self.browser.human_delay(2, 4)
 
         current_url = self.driver.current_url
         if "login" in current_url:
-            logger.warning("RevoU requires authentication! Please log in on the opened browser window.")
+            logger.warning("RevoU requires authentication! Please log in on the opened browser window...")
             print("\n" + "="*60)
             print("👉 SILAKAN LOGIN KE REVOU CAREER COMPANION DI BROWSER.")
-            print("Setelah login dan dashboard terbuka, tekan ENTER di terminal ini...")
+            print("Sistem akan otomatis melanjutkan begitu login berhasil terdeteksi...")
             print("="*60 + "\n")
-            input("Tekan ENTER jika sudah selesai login di RevoU...")
-            self.browser.human_delay(2, 3)
-            return True
+            
+            # Wait up to 180 seconds for user to log in
+            for i in range(90):
+                time.sleep(2)
+                curr = self.driver.current_url
+                if "login" not in curr:
+                    logger.info("RevoU login detected successfully!")
+                    self.browser.human_delay(2, 3)
+                    return True
+            logger.warning("RevoU login timeout reached, continuing anyway...")
         return True
 
     def run_job_matching(self, job_title: str, job_description: str, job_url: str, cv_name: str = "Nasaruddin,ST2") -> dict:
