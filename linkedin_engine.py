@@ -342,7 +342,7 @@ class LinkedInEngine:
             # Check if submitted or success screen reached (English & Indonesian)
             success_indicators = self.driver.find_elements(
                 By.XPATH,
-                "//*[contains(text(), 'Application submitted') or contains(text(), 'Your application was sent') or contains(text(), 'Lamaran terkirim') or contains(text(), 'Lamaran Anda telah dikirim')]"
+                "//*[contains(text(), 'Application submitted') or contains(text(), 'Your application was sent') or contains(text(), 'Lamaran terkirim') or contains(text(), 'Lamaran dikirim') or contains(text(), 'Lamaran Anda telah dikirim')]"
             )
             if success_indicators:
                 logger.info("Application submission confirmed!")
