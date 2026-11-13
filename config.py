@@ -50,7 +50,8 @@ SEARCH_EASY_APPLY_ONLY = True  # Can be toggled if user wants external apply
 DEFAULT_WEEKLY_LIMIT = 10
 
 # Browser Settings
-CHROME_DEBUG_PORT = 9222
+FIREFOX_SOURCE_PROFILE = Path.home() / ".mozilla" / "firefox" / "uqvbnohk.default-esr"
+FIREFOX_WORKING_PROFILE = BASE_DIR / "firefox_working_profile"
 HEADLESS = False  # Set False so user can supervise & log in smoothly
 PAGE_TIMEOUT = 25  # seconds
 HUMAN_DELAY_MIN = 2.0

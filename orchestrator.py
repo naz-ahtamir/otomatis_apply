@@ -119,12 +119,13 @@ class JobAgentOrchestrator:
                         }
 
                         # PHASE 1: RevoU Job Matching
-                        logger.info("[PHASE 1] RevoU Job Matching with CV 'Nasaruddin,ST2'...")
+                        logger.info("[PHASE 1] RevoU Job Matching with CV 'NASARUDDIN, ST 2'...")
                         match_res = self.revou.run_job_matching(
                             job_title=job["title"],
+                            company_name=job["company"],
                             job_description=f"{job['title']} at {job['company']}",
                             job_url=job_url,
-                            cv_name="Nasaruddin,ST2"
+                            cv_name="NASARUDDIN, ST 2"
                         )
                         record["job_matching_status"] = match_res.get("status")
 
@@ -205,6 +206,7 @@ class JobAgentOrchestrator:
             details = self.linkedin.extract_job_details()
             job_title = details.get("title", "Software Developer")
             company_name = details.get("company", "Company")
+            job_description = details.get("description", f"{job_title} at {company_name}")
 
             logger.info(f"Detected Job: '{job_title}' at '{company_name}'")
 
@@ -224,12 +226,13 @@ class JobAgentOrchestrator:
             }
 
             # PHASE 1: RevoU Job Matching
-            logger.info("[PHASE 1] RevoU Job Matching with CV 'Nasaruddin,ST2'...")
+            logger.info("[PHASE 1] RevoU Job Matching with CV 'NASARUDDIN, ST 2'...")
             match_res = self.revou.run_job_matching(
                 job_title=job_title,
-                job_description=f"{job_title} at {company_name}",
+                company_name=company_name,
+                job_description=job_description,
                 job_url=job_url,
-                cv_name="Nasaruddin,ST2"
+                cv_name="NASARUDDIN, ST 2"
             )
             record["job_matching_status"] = match_res.get("status")
 
@@ -256,6 +259,7 @@ class JobAgentOrchestrator:
             tracker_payload = {
                 "company_name": company_name,
                 "job_title": job_title,
+                "job_description": job_description,
                 "job_url": job_url,
                 "screenshot_path": record["application_screenshot"],
                 "outreach_screenshot": record["recruiter_screenshot"]

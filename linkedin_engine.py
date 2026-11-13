@@ -215,24 +215,48 @@ class LinkedInEngine:
             logger.debug(f"Generic form autofill notice: {e}")
 
     def extract_job_details(self) -> dict:
-        """Extracts job title, company name, location from current job page."""
-        details = {"title": "Software Developer", "company": "Spait Infotech", "location": "Sydney, Australia"}
+        """Extracts job title, company name, location, and description from current job page."""
+        details = {"title": "Software Developer", "company": "Company", "location": "Remote", "description": ""}
         try:
-            # Job title
+            # 1. Try extracting from page title first (e.g. "Software Developer | Spait Infotech | LinkedIn")
+            page_title = self.driver.title or ""
+            if " | " in page_title:
+                parts = [p.strip() for p in page_title.split("|")]
+                if len(parts) >= 2 and parts[1].lower() != "linkedin":
+                    details["title"] = parts[0]
+                    details["company"] = parts[1]
+            elif " at " in page_title:
+                m = re.search(r"^(.*?)\s+at\s+(.*?)(?:\s+[—\-|]|$)", page_title)
+                if m:
+                    details["title"] = m.group(1).strip()
+                    details["company"] = m.group(2).strip()
+
+            # 2. Job title from H1
             title_elems = self.driver.find_elements(By.XPATH, "//h1[contains(@class, 'job-title') or contains(@class, 'topcard__title') or contains(@class, 't-24')] | //h1")
             for t in title_elems:
                 if t.text.strip():
                     details["title"] = t.text.strip()
                     break
 
-            # Company name
+            # 3. Company name from company link or top-card
             company_elems = self.driver.find_elements(
                 By.XPATH,
-                "//*[contains(@class, 'job-details-jobs-unified-top-card__company-name') or contains(@class, 'topcard__org-name-link') or contains(@class, 'job-details-jobs-unified-top-card__primary-description')]//a | //*[contains(@class, 'job-details-jobs-unified-top-card__company-name')]"
+                "//a[contains(@href, '/company/') and string-length(normalize-space(text())) > 0] | //*[contains(@class, 'job-details-jobs-unified-top-card__company-name')]//a"
             )
             for c in company_elems:
-                if c.text.strip():
-                    details["company"] = c.text.strip()
+                txt = c.text.strip()
+                if txt and "linkedin" not in txt.lower():
+                    details["company"] = txt
+                    break
+
+            # 4. Job description
+            desc_elems = self.driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class, 'jobs-description-content')] | //div[contains(@id, 'job-details')] | //article"
+            )
+            for d in desc_elems:
+                if d.text.strip():
+                    details["description"] = d.text.strip()
                     break
         except Exception as e:
             logger.debug(f"Error extracting job details: {e}")
@@ -240,7 +264,7 @@ class LinkedInEngine:
 
     def apply_job(self, job_url: str) -> dict:
         """
-        Navigates to job URL, applies using Easy Apply or external apply, and takes screenshot proof.
+        Navigates to job URL, applies using Easy Apply (EN/ID) or external apply, and takes screenshot proof.
         """
         logger.info(f"Opening job page: {job_url}")
         self.driver.get(job_url)
@@ -252,6 +276,7 @@ class LinkedInEngine:
             "job_url": job_url,
             "job_title": details.get("title"),
             "company_name": details.get("company"),
+            "description": details.get("description", ""),
             "status": "FAILED",
             "screenshot": None,
             "recruiter": None
@@ -260,15 +285,17 @@ class LinkedInEngine:
         # Extract recruiter if present
         application_result["recruiter"] = self.extract_job_poster()
 
-        # Find Easy Apply button
+        # Find Easy Apply button (English: Easy Apply, Indonesian: Melamar Mudah)
         easy_apply_btn = None
         try:
             buttons = self.driver.find_elements(
                 By.XPATH,
-                "//button[contains(@class, 'jobs-apply-button') and contains(., 'Easy Apply')]"
+                "//button[contains(@class, 'jobs-apply-button') and (contains(., 'Easy Apply') or contains(., 'Melamar Mudah'))] | //button[contains(@aria-label, 'Easy Apply') or contains(@aria-label, 'Melamar Mudah')]"
             )
-            if buttons:
-                easy_apply_btn = buttons[0]
+            for b in buttons:
+                if b.is_displayed():
+                    easy_apply_btn = b
+                    break
         except Exception:
             pass
 
@@ -277,7 +304,7 @@ class LinkedInEngine:
             logger.info("Easy Apply button not found, checking for external Apply button...")
             apply_buttons = self.driver.find_elements(
                 By.XPATH,
-                "//button[contains(@class, 'jobs-apply-button') or contains(., 'Apply')] | //a[contains(@class, 'jobs-apply-button') or contains(., 'Apply')]"
+                "//button[contains(@class, 'jobs-apply-button') and (contains(., 'Apply') or contains(., 'Lamar'))] | //a[contains(@class, 'jobs-apply-button') and (contains(., 'Apply') or contains(., 'Lamar'))]"
             )
             if apply_buttons:
                 logger.info("Found external Apply button. Initiating application...")
@@ -301,20 +328,21 @@ class LinkedInEngine:
                 application_result["status"] = "NO_APPLY_BUTTON"
                 return application_result
 
+        logger.info(f"Clicking '{easy_apply_btn.text.strip()}' button...")
         easy_apply_btn.click()
         self.browser.human_delay(2, 3)
 
         # Handle Easy Apply Multi-Step Dialog
-        max_steps = 8
+        max_steps = 10
         step = 0
         while step < max_steps:
             step += 1
             self.browser.human_delay(1.5, 2.5)
 
-            # Check if submitted or success screen reached
+            # Check if submitted or success screen reached (English & Indonesian)
             success_indicators = self.driver.find_elements(
                 By.XPATH,
-                "//*[contains(text(), 'Application submitted') or contains(text(), 'Your application was sent')]"
+                "//*[contains(text(), 'Application submitted') or contains(text(), 'Your application was sent') or contains(text(), 'Lamaran terkirim') or contains(text(), 'Lamaran Anda telah dikirim')]"
             )
             if success_indicators:
                 logger.info("Application submission confirmed!")
@@ -334,26 +362,56 @@ class LinkedInEngine:
                 except Exception as e:
                     logger.debug(f"Resume upload field error: {e}")
 
-            # Answer standard text inputs & selects
-            form_inputs = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'jobs-easy-apply-modal')]//input[@type='text' or @type='number']")
+            # Answer standard text inputs & selects inside modal dialog
+            form_inputs = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'artdeco-modal') or @role='dialog']//input[@type='text' or @type='number']")
             for inp in form_inputs:
                 val = inp.get_attribute("value")
                 if not val:
-                    self.answer_form_field(inp)
+                    if not self.answer_form_field(inp):
+                        inp.send_keys("1")
 
-            selects = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'jobs-easy-apply-modal')]//select")
+            selects = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'artdeco-modal') or @role='dialog']//select")
             for sel in selects:
-                self.answer_form_field(sel)
+                if not self.answer_form_field(sel):
+                    try:
+                        s_obj = Select(sel)
+                        if s_obj.first_selected_option.text.strip().lower() in ["select an option", "pilih opsi", ""]:
+                            if len(s_obj.options) > 1:
+                                s_obj.select_by_index(1)
+                    except Exception:
+                        pass
 
-            # Check for Next / Review / Submit Button
+            # Handle radio button groups (select 'Yes'/'Ya' or first option if unselected)
+            fieldsets = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'artdeco-modal') or @role='dialog']//fieldset")
+            for fs in fieldsets:
+                try:
+                    radios = fs.find_elements(By.XPATH, ".//input[@type='radio']")
+                    if radios and not any(r.is_selected() for r in radios):
+                        labels = fs.find_elements(By.XPATH, ".//label")
+                        clicked = False
+                        for lbl in labels:
+                            if any(k in lbl.text.strip().lower() for k in ["yes", "ya"]):
+                                lbl.click()
+                                clicked = True
+                                break
+                        if not clicked and labels:
+                            labels[0].click()
+                except Exception:
+                    pass
+
+            # Check for Submit / Review / Next Button (English & Indonesian)
             action_btn = None
-            for btn_text in ["Submit application", "Review", "Next"]:
+            submit_keywords = ["Submit application", "Kirim lamaran", "Review", "Tinjau", "Next", "Berikutnya", "Lanjut"]
+            for btn_text in submit_keywords:
                 candidates = self.driver.find_elements(
                     By.XPATH,
-                    f"//div[contains(@class, 'jobs-easy-apply-modal')]//button[contains(., '{btn_text}')]"
+                    f"//button[contains(., '{btn_text}') or contains(@aria-label, '{btn_text}')]"
                 )
-                if candidates:
-                    action_btn = candidates[0]
+                for c in candidates:
+                    if c.is_displayed() and c.is_enabled():
+                        action_btn = c
+                        break
+                if action_btn:
                     break
 
             if action_btn:
@@ -361,18 +419,19 @@ class LinkedInEngine:
                 action_btn.click()
                 logger.info(f"Easy Apply Step {step}: Clicked '{action_text}'")
                 self.browser.human_delay(2, 3)
-                if "Submit" in action_text:
+                if any(k in action_text.lower() for k in ["submit", "kirim"]):
                     self.browser.human_delay(3, 5)
                     application_result["status"] = "SUCCESS"
                     application_result["screenshot"] = self.browser.take_screenshot("applied_proof")
                     break
             else:
-                # No next button found, might be error or completed
+                logger.warning(f"No action button found at step {step}. Capturing current state.")
+                application_result["screenshot"] = self.browser.take_screenshot("easy_apply_step_stuck")
                 break
 
         # If finished but modal is still open with dismiss, close it
         try:
-            dismiss_btn = self.driver.find_element(By.XPATH, "//button[contains(@aria-label, 'Dismiss') or contains(@class, 'artdeco-modal__dismiss')]")
+            dismiss_btn = self.driver.find_element(By.XPATH, "//button[contains(@aria-label, 'Dismiss') or contains(@aria-label, 'Tutup') or contains(@class, 'artdeco-modal__dismiss')]")
             dismiss_btn.click()
         except Exception:
             pass
@@ -394,22 +453,31 @@ class LinkedInEngine:
 
         profile_url = recruiter_info.get("profile_url") if recruiter_info else None
         
-        # If no direct recruiter profile on job card, search company recruiter
+        # If no direct recruiter profile on job card, search company recruiter or closest contact
         if not profile_url:
-            logger.info(f"No direct recruiter found. Searching recruiter for {company_name}...")
-            search_query = f"{company_name} recruiter LinkedIn"
-            search_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote(company_name + ' technical recruiter')}"
-            self.driver.get(search_url)
-            self.browser.human_delay(3, 4)
-            people_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/in/') and .//span[@aria-hidden='true']]")
-            if people_links:
-                profile_url = people_links[0].get_attribute("href")
-                outreach_result["recruiter_name"] = people_links[0].text.strip()
-                outreach_result["profile_url"] = profile_url
-                logger.info(f"Discovered contact at {company_name}: {outreach_result['recruiter_name']} ({profile_url})")
+            logger.info(f"No direct recruiter found. Searching recruiter/team for {company_name}...")
+            for query in [f"{company_name} recruiter", f"{company_name} HR", company_name]:
+                search_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote(query)}"
+                self.driver.get(search_url)
+                self.browser.human_delay(3, 4)
+                people_links = self.driver.find_elements(
+                    By.XPATH,
+                    "//a[contains(@href, '/in/') and not(contains(@href, 'nasaruddin'))]"
+                )
+                for link in people_links:
+                    href = link.get_attribute("href")
+                    txt = link.text.strip()
+                    if href and "/in/" in href and txt and "linkedin" not in txt.lower():
+                        profile_url = href.split("?")[0]
+                        outreach_result["recruiter_name"] = txt.split("\n")[0].strip()
+                        outreach_result["profile_url"] = profile_url
+                        logger.info(f"Discovered contact at {company_name}: {outreach_result['recruiter_name']} ({profile_url})")
+                        break
+                if profile_url:
+                    break
 
         if not profile_url:
-            logger.warning(f"Could not find any recruiter for {company_name}.")
+            logger.warning(f"Could not find any recruiter or contact for {company_name}.")
             outreach_result["status"] = "NO_RECRUITER_FOUND"
             return outreach_result
 
@@ -417,34 +485,47 @@ class LinkedInEngine:
         self.driver.get(profile_url)
         self.browser.human_delay(3, 5)
 
-        # Look for Connect button
+        # Look for Connect button inside //main (English: Connect, Indonesian: Hubungkan / Koneksi)
         connect_btn = None
         try:
             buttons = self.driver.find_elements(
                 By.XPATH,
-                "//button[contains(@class, 'artdeco-button') and contains(., 'Connect')]"
+                "//main//button[contains(., 'Connect') or contains(., 'Hubungkan') or contains(., 'Koneksi')] | //main//a[contains(., 'Connect') or contains(., 'Hubungkan') or contains(., 'Koneksi')]"
             )
-            if buttons:
-                connect_btn = buttons[0]
-            else:
-                # Check under 'More' dropdown
-                more_btn = self.driver.find_element(By.XPATH, "//button[contains(@aria-label, 'More actions') or contains(., 'More')]")
-                more_btn.click()
-                self.browser.human_delay(1, 2)
-                connect_menu = self.driver.find_element(By.XPATH, "//*[@role='button' and contains(., 'Connect')]")
-                connect_btn = connect_menu
+            for b in buttons:
+                if b.is_displayed():
+                    connect_btn = b
+                    break
+            if not connect_btn:
+                # Check under 'More' / 'Lainnya' dropdown inside //main
+                more_btns = self.driver.find_elements(
+                    By.XPATH,
+                    "//main//button[contains(@aria-label, 'More actions') or contains(@aria-label, 'Tindakan lainnya') or contains(., 'More') or contains(., 'Lainnya')]"
+                )
+                for m in more_btns:
+                    if m.is_displayed():
+                        m.click()
+                        self.browser.human_delay(1, 2)
+                        connect_menu = self.driver.find_elements(
+                            By.XPATH,
+                            "//main//*[@role='button' and (contains(., 'Connect') or contains(., 'Hubungkan') or contains(., 'Koneksi'))]"
+                        )
+                        if connect_menu:
+                            connect_btn = connect_menu[0]
+                            break
         except Exception:
             pass
 
         if not connect_btn:
             logger.warning(f"Connect button not available on {profile_url} (might be already connected or followed).")
+            outreach_result["screenshot"] = self.browser.take_screenshot("recruiter_profile_visited")
             outreach_result["status"] = "CONNECT_BUTTON_UNAVAILABLE"
             return outreach_result
 
         connect_btn.click()
         self.browser.human_delay(1.5, 2.5)
 
-        # Handle 'Add a note' dialog
+        # Handle 'Add a note' / 'Tambahkan catatan' dialog
         note_text = generate_recruiter_note(
             outreach_result.get("recruiter_name") or "there",
             job_title,
@@ -453,7 +534,10 @@ class LinkedInEngine:
         outreach_result["note_sent"] = note_text
 
         try:
-            add_note_btn = self.driver.find_elements(By.XPATH, "//button[contains(., 'Add a note')]")
+            add_note_btn = self.driver.find_elements(
+                By.XPATH,
+                "//button[contains(., 'Add a note') or contains(., 'Tambahkan catatan') or contains(., 'Tambahkan pesan')]"
+            )
             if add_note_btn:
                 add_note_btn[0].click()
                 self.browser.human_delay(1, 2)
@@ -466,8 +550,11 @@ class LinkedInEngine:
             screenshot_path = self.browser.take_screenshot("recruiter_connection_note")
             outreach_result["screenshot"] = screenshot_path
 
-            # Click Send button
-            send_btn = self.driver.find_element(By.XPATH, "//button[contains(., 'Send') or contains(., 'Kirim')]")
+            # Click Send button (English: Send, Indonesian: Kirim)
+            send_btn = self.driver.find_element(
+                By.XPATH,
+                "//button[contains(., 'Send') or contains(., 'Kirim')]"
+            )
             send_btn.click()
             self.browser.human_delay(2, 3)
 
@@ -478,8 +565,12 @@ class LinkedInEngine:
             logger.warning(f"Error while sending note (may have hit note quota): {e}")
             # Try sending without note if note quota exceeded
             try:
-                send_no_note = self.driver.find_elements(By.XPATH, "//button[contains(., 'Send without note') or contains(., 'Send')]")
+                send_no_note = self.driver.find_elements(
+                    By.XPATH,
+                    "//button[contains(., 'Send without note') or contains(., 'Kirim tanpa catatan') or contains(., 'Send') or contains(., 'Kirim')]"
+                )
                 if send_no_note:
+                    outreach_result["screenshot"] = self.browser.take_screenshot("recruiter_connection_sent")
                     send_no_note[0].click()
                     outreach_result["status"] = "SENT_WITHOUT_NOTE"
             except Exception:

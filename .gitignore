@@ -5,6 +5,7 @@ __pycache__/
 
 # Browser profile & session data (sensitive)
 browser_profile/
+firefox_working_profile/
 
 # Logs and databases
 *.log
